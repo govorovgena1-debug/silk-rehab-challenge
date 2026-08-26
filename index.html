@@ -363,7 +363,7 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
     key:'sb_publishable_Wvm0j43ZPofN3TNNmbO4gw_jAO7UFZn',
     table:'silk_progress'
   };
-  var cloudOn=!!(SUPA.url&&SUPA.key), cloudLive=false, pullTimer=null;
+  var cloudOn=!!(SUPA.url&&SUPA.key), cloudLive=false, pullTimer=null, CLOUD={};
   function cloudHead(){ return {apikey:SUPA.key,Authorization:'Bearer '+SUPA.key}; }
   function cloudPull(cb){
     if(!cloudOn||!window.fetch){ cb(null); return; }
@@ -380,6 +380,7 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
       if(!p) continue;
       var mine=(row.id===state.me);
       var rc=parseInt(row.count,10)||0;
+      CLOUD[row.id]={posts:(row.posts||[]).slice(),checkpoints:(row.checkpoints||[]).slice()};
       if(mine&&rc<p.count) continue;           /* своё локальное новее — не затираем */
       p.count=rc;
       p.collabs=parseInt(row.collabs,10)||0;
@@ -633,7 +634,7 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
     var rows='';
     for(var j=0;j<sorted.length;j++){
       var pp=sorted[j],w=top?Math.round(pp.count/Math.max(top,goal)*100):0;
-      rows+='<div class="row"><span class="rank">'+two(j+1)+'</span>'+
+      rows+='<div class="row" data-who="'+esc(pp.id)+'" role="button" tabindex="0" style="cursor:pointer"><span class="rank">'+two(j+1)+'</span>'+
         (pp.photo?'<img class="thumb" src="'+esc(pp.photo)+'" alt="">':'')+
         '<div class="who"><span class="nm">'+esc(pp.name)+
           (pp.role?'<span class="role">'+esc(pp.role)+'</span>':'')+
@@ -696,6 +697,7 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
         mrows+msum+'</section>'+
 
       '<section class="panel"><div class="panel__head"><span class="label">Рейтинг</span></div>'+rows+
+        '<div class="ach__hint" style="margin-top:12px">Нажми на любую строку, чтобы посмотреть её ролики и охваты</div>'+
         (c.prize?'<div class="prize"><span class="label">Первый приз · за рилсы</span><p>'+esc(c.prize)+'</p></div>':'')+
         '<div class="prize"><span class="label">Второй приз · за достижения</span>'+
           (c.prize2?'<p style="margin-bottom:10px">'+esc(c.prize2)+'</p>':'')+arows+'</div></section>'+
@@ -721,6 +723,10 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
     if(lv) lv.addEventListener('click',leave);
     var links=app.querySelectorAll('.plink');
     for(var g=0;g<links.length;g++) links[g].addEventListener('click',function(){ openLink(this.getAttribute('data-url')); });
+    var whos=app.querySelectorAll('.row[data-who]');
+    for(var y=0;y<whos.length;y++) whos[y].addEventListener('click',function(){
+      whoId=this.getAttribute('data-who'); openSheet('who');
+    });
     var achs=app.querySelectorAll('.ach__i');
     for(var z2=0;z2<achs.length;z2++) achs[z2].addEventListener('click',function(){ bumpAch(this.getAttribute('data-ach')); });
     var rt=document.getElementById('retry');
@@ -736,11 +742,47 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
   }
 
   /* ---------- шторки ---------- */
+  var whoId='';
   function openSheet(mode){
-    sheetIn.innerHTML=(mode==='metrics')?metricsForm():(mode==='ideas'?ideasForm():reelForm());
+    sheetIn.innerHTML=(mode==='metrics')?metricsForm():(mode==='ideas'?ideasForm():(mode==='who'?whoForm():reelForm()));
     document.body.classList.add('open');
     bindSheet(mode);
-    if(mode!=='ideas') setTimeout(function(){ var f=sheetIn.querySelector('.field'); if(f) f.focus(); },340);
+    if(mode!=='ideas'&&mode!=='who') setTimeout(function(){ var f=sheetIn.querySelector('.field'); if(f) f.focus(); },340);
+  }
+  function whoForm(){
+    var p=byId(whoId);
+    if(!p) return '<div class="empty">Участница не найдена.</div><button class="cta" id="cancel" style="margin-top:22px">Закрыть</button>';
+    var mine=(p.id===state.me);
+    var data=mine?{posts:state.posts,checkpoints:state.checkpoints}:(CLOUD[p.id]||{posts:[],checkpoints:[]});
+    var posts=data.posts||[], cps=data.checkpoints||[];
+    var out='<span class="label">'+(mine?'Это ты':'Участница')+'</span>'+
+      '<h2>'+esc(p.name)+(p.role?' · '+esc(p.role):'')+'</h2>'+
+      '<p>Отмечено роликов: '+p.count+' из '+state.challenge.goal+
+        '. Сотрудничества: '+(p.collabs||0)+'. Рилсы 10 000+: '+(p.viral||0)+'.'+
+        (p.goal?' Цель: '+esc(p.goal):'')+'</p>';
+    if(cps.length){
+      out+='<div class="mhead"><span>Замер</span><span>Подписчики</span><span>Охваты</span></div>';
+      for(var i=0;i<cps.length;i++){
+        var c=cps[i], prev=i?cps[i-1]:null;
+        var df=prev?c.followers-prev.followers:null, dr=prev?c.reach-prev.reach:null;
+        out+='<div class="mrow"><span class="mk"><b>'+(i===0?'Старт':'Неделя '+i)+'</b><small>'+fmtDate(c.date)+'</small></span>'+
+          '<span class="mval">'+num(c.followers)+(df===null?'':'<em class="'+(df<0?'down':'')+'">'+delta(df)+'</em>')+'</span>'+
+          '<span class="mval">'+num(c.reach)+(dr===null?'':'<em class="'+(dr<0?'down':'')+'">'+delta(dr)+'</em>')+'</span></div>';
+      }
+    } else {
+      out+='<div class="mempty">Замеров пока нет.</div>';
+    }
+    if(posts.length){
+      for(var k=0;k<posts.length;k++){
+        var it=posts[k];
+        out+='<div class="post"><span class="pnum">'+two(parseInt(it.n,10)||0)+'</span>'+
+          '<span class="pdate">'+fmtDate(it.date)+'<small>'+esc(it.url||'')+'</small></span>'+
+          (it.url?'<button class="plink" data-url="'+esc(it.url)+'">Открыть</button>':'')+'</div>';
+      }
+    } else {
+      out+='<div class="empty">Отметок пока нет.</div>';
+    }
+    return out+'<button class="cta" id="cancel" style="margin-top:22px">Закрыть</button>';
   }
   function closeSheet(){ document.body.classList.remove('open'); }
 
@@ -782,6 +824,11 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
   function bindSheet(mode){
     var cancel=document.getElementById('cancel');
     if(cancel) cancel.addEventListener('click',closeSheet);
+    if(mode==='who'){
+      var wl=sheetIn.querySelectorAll('.plink');
+      for(var n=0;n<wl.length;n++) wl[n].addEventListener('click',function(){ openLink(this.getAttribute('data-url')); });
+      return;
+    }
     if(mode==='ideas') return;
 
     var msg=document.getElementById('msg');
