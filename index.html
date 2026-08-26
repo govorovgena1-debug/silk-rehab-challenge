@@ -338,11 +338,15 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
     while(bytes(out)>3900&&posts.length){ posts.pop(); out=pack(posts,cps); }
     while(bytes(out)>3900&&cps.length>1){ cps.shift(); out=pack(posts,cps); }
     store(mineKey(state.me),out);
+    cloudPush();
   }
-  function restoreMine(raw){
-    if(!raw) return;
-    var d; try{ d=JSON.parse(raw); }catch(e){ return; }
-    if(!d||typeof d!=='object') return;
+  function parseMine(raw){
+    if(!raw) return null;
+    var d; try{ d=JSON.parse(raw); }catch(e){ return null; }
+    return (d&&typeof d==='object')?d:null;
+  }
+  function applyMine(d){
+    if(!d) return;
     var me=byId(state.me); if(!me) return;
     if(typeof d.count==='number') me.count=d.count;
     if(typeof d.collabs==='number') me.collabs=d.collabs;
@@ -351,21 +355,99 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
     if(d.posts&&d.posts.length) state.posts=d.posts.slice();
     if(d.checkpoints&&d.checkpoints.length) state.checkpoints=d.checkpoints.slice();
   }
+  function restoreMine(raw){ applyMine(parseMine(raw)); }
+
+  /* ---------- общий счёт: база Supabase ---------- */
+  var SUPA={
+    url:'https://futhxncsxfivjtkrlhza.supabase.co',
+    key:'sb_publishable_Wvm0j43ZPofN3TNNmbO4gw_jAO7UFZn',
+    table:'silk_progress'
+  };
+  var cloudOn=!!(SUPA.url&&SUPA.key), cloudLive=false, pullTimer=null;
+  function cloudHead(){ return {apikey:SUPA.key,Authorization:'Bearer '+SUPA.key}; }
+  function cloudPull(cb){
+    if(!cloudOn||!window.fetch){ cb(null); return; }
+    var u=SUPA.url+'/rest/v1/'+SUPA.table+'?select=*&order=id';
+    fetch(u,{headers:cloudHead(),cache:'no-store'})
+      .then(function(r){ return r.ok?r.json():null; })
+      .then(function(rows){ cloudLive=!!rows; cb(rows&&rows.length?rows:(rows?[]:null)); })
+      .catch(function(){ cloudLive=false; cb(null); });
+  }
+  function applyRows(rows){
+    if(!rows) return;
+    for(var i=0;i<rows.length;i++){
+      var row=rows[i], p=byId(row.id);
+      if(!p) continue;
+      var mine=(row.id===state.me);
+      var rc=parseInt(row.count,10)||0;
+      if(mine&&rc<p.count) continue;           /* своё локальное новее — не затираем */
+      p.count=rc;
+      p.collabs=parseInt(row.collabs,10)||0;
+      p.viral=parseInt(row.viral,10)||0;
+      if(row.goal) p.goal=row.goal;
+      if(mine){
+        if(row.posts&&row.posts.length) state.posts=row.posts.slice();
+        if(row.checkpoints&&row.checkpoints.length) state.checkpoints=row.checkpoints.slice();
+      }
+    }
+  }
+  function cloudPush(){
+    if(!cloudOn||!window.fetch) return;
+    var me=getMe(); if(!me) return;
+    var body=[{id:state.me,count:me.count,collabs:me.collabs,viral:me.viral,
+      goal:String(me.goal||'').slice(0,300),posts:state.posts.slice(0,200),
+      checkpoints:state.checkpoints,updated_at:new Date().toISOString()}];
+    var h=cloudHead();
+    h['Content-Type']='application/json';
+    h['Prefer']='resolution=merge-duplicates';
+    fetch(SUPA.url+'/rest/v1/'+SUPA.table+'?on_conflict=id',{method:'POST',headers:h,body:JSON.stringify(body)})
+      .then(function(r){ cloudLive=r.ok; })
+      .catch(function(){ cloudLive=false; });
+  }
+  function cloudRefresh(){
+    if(!state||!state.me) return;
+    if(document.body.classList.contains('open')) return;   /* открыта шторка — не дёргаем экран */
+    cloudPull(function(rows){ if(!rows) return; applyRows(rows); render(); });
+  }
+  function startPull(){
+    if(pullTimer||!cloudOn) return;
+    pullTimer=setInterval(cloudRefresh,30000);
+    document.addEventListener('visibilitychange',function(){ if(!document.hidden) cloudRefresh(); });
+  }
 
   function boot(d){
     state=prepare(d);
     load('silk_me',function(id){
-      if(!id){ render(); return; }
+      if(!id){
+        cloudPull(function(rows){ applyRows(rows); render(); startPull(); });
+        return;
+      }
       load('silk_goal',function(g){
         var p=byId(id);
         if(p){ state.me=id; if(g) p.goal=g; }
-        if(!state.me){ render(); return; }
+        if(!state.me){
+          cloudPull(function(rows){ applyRows(rows); render(); startPull(); });
+          return;
+        }
         load(mineKey(state.me),function(raw){
-          restoreMine(raw);
-          render();
+          var local=parseMine(raw);
+          cloudPull(function(rows){
+            applyRows(rows);
+            var me=getMe();
+            if(local&&me&&(local.count||0)>me.count){ applyMine(local); cloudPush(); }
+            else if(local&&me&&!rowFor(rows,state.me)){ applyMine(local); cloudPush(); }
+            saveMine();
+            render();
+            startPull();
+          });
         });
       });
     });
+  }
+  function rowFor(rows,id){
+    if(!rows) return null;
+    for(var i=0;i<rows.length;i++) if(rows[i].id===id) return rows[i];
+    return null;
   }
 
   fetch('data.json?v='+Date.now(),{cache:'no-store'})
