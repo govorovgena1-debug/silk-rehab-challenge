@@ -486,6 +486,16 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
     for(var i=0;i<rows.length;i++) if(rows[i].id===id) return rows[i];
     return null;
   }
+  /* данные участницы: свои берём из state, чужие из общей базы */
+  function dataOf(id){
+    if(id===state.me) return {posts:state.posts||[],checkpoints:state.checkpoints||[]};
+    var c=CLOUD[id]||{};
+    return {posts:c.posts||[],checkpoints:c.checkpoints||[]};
+  }
+  function lastPoint(id){
+    var cp=dataOf(id).checkpoints;
+    return cp.length?cp[cp.length-1]:null;
+  }
 
   fetch('data.json?v='+Date.now(),{cache:'no-store'})
     .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
@@ -670,13 +680,16 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
     var rows='';
     for(var j=0;j<sorted.length;j++){
       var pp=sorted[j],w=top?Math.round(pp.count/Math.max(top,goal)*100):0;
+      var lp=lastPoint(pp.id);
+      var lpTxt=lp?(num(lp.followers)+' '+plural(lp.followers,'подписчик','подписчика','подписчиков')+' · '+num(lp.reach)+' охватов'):'замеров ещё нет';
       rows+='<div class="row" data-who="'+esc(pp.id)+'" role="button" tabindex="0" style="cursor:pointer"><span class="rank">'+two(j+1)+'</span>'+
         (pp.photo?'<img class="thumb" src="'+esc(pp.photo)+'" alt="">':'')+
         '<div class="who"><span class="nm">'+esc(pp.name)+
           (pp.role?'<span class="role">'+esc(pp.role)+'</span>':'')+
           ((j===0&&top>0)?'<span class="mark">лидер</span>':'')+
           (pp.id===state.me?'<span class="mark mark--you">ты</span>':'')+'</span>'+
-          '<span class="line"><i style="width:'+Math.max(w,3)+'%"></i></span></div>'+
+          '<span class="line"><i style="width:'+Math.max(w,3)+'%"></i></span>'+
+          '<span class="hint" style="margin-top:5px;font-size:11px;opacity:.75">'+lpTxt+'</span></div>'+
         '<span class="cnt">'+pp.count+'<span>&nbsp;/&nbsp;'+goal+'</span></span></div>';
     }
 
@@ -694,6 +707,28 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
         posts+='<div class="post"><span class="pnum">'+two(parseInt(it.n,10)||0)+'</span>'+
           '<span class="pdate">'+fmtDate(it.date)+'<small>'+esc(it.url||'')+'</small></span>'+
           (it.url?'<button class="plink" data-url="'+esc(it.url)+'">Открыть</button>':'')+'</div>';
+      }
+    }
+
+    /* лента отметок всех участниц */
+    var feed=[];
+    for(var fp=0;fp<state.participants.length;fp++){
+      var who=state.participants[fp], list=dataOf(who.id).posts;
+      for(var fq=0;fq<list.length;fq++){
+        var itm=list[fq];
+        if(!itm||!itm.url) continue;
+        feed.push({name:who.name,role:who.role,date:itm.date||'',url:itm.url,n:parseInt(itm.n,10)||0,mine:who.id===state.me});
+      }
+    }
+    feed.sort(function(a,b){ return String(b.date).localeCompare(String(a.date))||b.n-a.n; });
+    var allposts='';
+    if(!feed.length){ allposts='<div class="empty">Пока никто не отметился. Первый ролик появится здесь.</div>'; }
+    else{
+      for(var fk=0;fk<Math.min(feed.length,40);fk++){
+        var f=feed[fk];
+        allposts+='<div class="post"><span class="pnum">'+two(f.n)+'</span>'+
+          '<span class="pdate">'+esc(f.name)+(f.mine?' · ты':'')+'<small>'+fmtDate(f.date)+' · '+esc(f.url)+'</small></span>'+
+          '<button class="plink" data-url="'+esc(f.url)+'">Открыть</button></div>';
       }
     }
 
@@ -743,6 +778,8 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
         '<div class="hint" style="margin-top:8px">'+esc(c.ruleDetail)+'</div></section>'+
 
       '<section class="panel"><div class="panel__head"><span class="label">Мои отметки</span></div>'+posts+'</section>'+
+
+      '<section class="panel"><div class="panel__head"><span class="label">Отметки всех</span></div>'+allposts+'</section>'+
 
       '<div class="cta-wrap"><button class="cta" id="add"'+((remain===0&&!ms.due)?' disabled':'')+'>'+
         (ms.due?'Внести данные за неделю':(remain===0?'Цель закрыта':'Отметить рилс'))+'</button></div>';
