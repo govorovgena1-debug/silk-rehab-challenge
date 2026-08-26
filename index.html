@@ -242,9 +242,11 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
 (function(){
   var app=document.getElementById('app'), sheetIn=document.getElementById('sheetIn'), state=null;
 
+  var TGID='';
   try{
     var tg=window.Telegram && window.Telegram.WebApp;
     if(tg){ tg.ready(); tg.expand(); try{ tg.setHeaderColor('#0A0807'); }catch(e){} }
+    if(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.id) TGID=String(tg.initDataUnsafe.user.id);
   }catch(e){}
 
   /* ---------- утилиты ---------- */
@@ -300,24 +302,32 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
   var MEM={}, CS=null, LS=null, persist=false;
   try{ CS=(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.CloudStorage)||null; }catch(e){}
   if(!(CS&&CS.setItem&&CS.getItem)) CS=null;
-  if(!CS){
-    try{ window.localStorage.setItem('silk_probe','1'); window.localStorage.removeItem('silk_probe'); LS=window.localStorage; }catch(e){ LS=null; }
-  }
+  try{ window.localStorage.setItem('silk_probe','1'); window.localStorage.removeItem('silk_probe'); LS=window.localStorage; }catch(e){ LS=null; }
   if(CS||LS) persist=true;
+  /* пишем сразу в оба хранилища: CloudStorage может молча не сработать */
   function store(k,v){
-    if(CS){ try{ CS.setItem(k,String(v),function(){}); return; }catch(e){} }
-    if(LS){ try{ LS.setItem(k,String(v)); return; }catch(e){} }
-    MEM[k]=String(v);
+    var s=String(v), done=false;
+    if(CS){ try{ CS.setItem(k,s,function(){}); done=true; }catch(e){} }
+    if(LS){ try{ LS.setItem(k,s); done=true; }catch(e){} }
+    if(!done) MEM[k]=s;
   }
   function forget(k){
     if(CS){ try{ CS.removeItem(k,function(){}); }catch(e){} }
     if(LS){ try{ LS.removeItem(k); }catch(e){} }
     delete MEM[k];
   }
+  function fromLocal(k){
+    if(LS){ try{ return LS.getItem(k)||null; }catch(e){} }
+    return MEM[k]||null;
+  }
   function load(k,cb){
-    if(CS){ try{ CS.getItem(k,function(err,val){ cb(err?null:(val||null)); }); return; }catch(e){} }
-    if(LS){ try{ cb(LS.getItem(k)||null); return; }catch(e){} }
-    cb(MEM[k]||null);
+    if(CS){
+      try{
+        CS.getItem(k,function(err,val){ cb((!err&&val)?val:fromLocal(k)); });
+        return;
+      }catch(e){}
+    }
+    cb(fromLocal(k));
   }
 
   /* ---------- сохранение своего прогресса ---------- */
@@ -392,18 +402,31 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
       }
     }
   }
+  var noTgCol=false;
   function cloudPush(){
     if(!cloudOn||!window.fetch) return;
     var me=getMe(); if(!me) return;
-    var body=[{id:state.me,count:me.count,collabs:me.collabs,viral:me.viral,
-      goal:String(me.goal||'').slice(0,300),posts:state.posts.slice(0,200),
-      checkpoints:state.checkpoints,updated_at:new Date().toISOString()}];
-    var h=cloudHead();
-    h['Content-Type']='application/json';
-    h['Prefer']='resolution=merge-duplicates';
-    fetch(SUPA.url+'/rest/v1/'+SUPA.table+'?on_conflict=id',{method:'POST',headers:h,body:JSON.stringify(body)})
-      .then(function(r){ cloudLive=r.ok; })
-      .catch(function(){ cloudLive=false; });
+    var send=function(withTg){
+      var rec={id:state.me,count:me.count,collabs:me.collabs,viral:me.viral,
+        goal:String(me.goal||'').slice(0,300),posts:state.posts.slice(0,200),
+        checkpoints:state.checkpoints,updated_at:new Date().toISOString()};
+      if(withTg&&TGID) rec.tg_id=TGID;
+      var h=cloudHead();
+      h['Content-Type']='application/json';
+      h['Prefer']='resolution=merge-duplicates';
+      fetch(SUPA.url+'/rest/v1/'+SUPA.table+'?on_conflict=id',{method:'POST',headers:h,body:JSON.stringify([rec])})
+        .then(function(r){
+          if(!r.ok&&withTg&&r.status===400){ noTgCol=true; send(false); return; }  /* колонки tg_id ещё нет */
+          cloudLive=r.ok;
+        })
+        .catch(function(){ cloudLive=false; });
+    };
+    send(!noTgCol);
+  }
+  function idByTg(rows){
+    if(!TGID||!rows) return '';
+    for(var i=0;i<rows.length;i++) if(rows[i].tg_id&&String(rows[i].tg_id)===TGID) return rows[i].id;
+    return '';
   }
   function cloudRefresh(){
     if(!state||!state.me) return;
@@ -420,7 +443,20 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
     state=prepare(d);
     load('silk_me',function(id){
       if(!id){
-        cloudPull(function(rows){ applyRows(rows); render(); startPull(); });
+        /* память устройства пуста — узнаём по аккаунту Telegram */
+        cloudPull(function(rows){
+          var known=idByTg(rows);
+          if(known&&byId(known)){
+            state.me=known; store('silk_me',known);
+            applyRows(rows);
+            var mg=getMe();
+            if(mg&&mg.goal) store('silk_goal',mg.goal);
+            saveMine();
+          } else {
+            applyRows(rows);
+          }
+          render(); startPull();
+        });
         return;
       }
       load('silk_goal',function(g){
