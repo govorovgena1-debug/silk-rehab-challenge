@@ -296,21 +296,60 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
     ideas:[[{"cat": "Ниша", "title": "Три ошибки в домашнем уходе за волосами", "how": "Один дубль на камеру, по пунктам. Говори только то, что подтвердишь на практике."}, {"cat": "UGC", "title": "Первое знакомство со средством", "how": "Снимай как обычный покупатель: упаковка, текстура на руке, честное первое впечатление. Такой ролик кладётся в портфолио для брендов."}, {"cat": "Лайф", "title": "Утро перед сменой", "how": "Сборы, дорога, первый кофе. Живой звук, голосом — что сегодня по плану."}, {"cat": "Фешн", "title": "Собираю образ на работу", "how": "Примерка двух-трёх комплектов на себе. Комментируй выбор."}, {"cat": "Тренд", "title": "Формат «сказали / оказалось»", "how": "Возьми звук, который прямо сейчас в рекомендациях, и подставь свою рабочую историю. Какой звук актуален на этой неделе — смотри в Reels сама, я этого знать не могу."}], [{"cat": "Ниша", "title": "От чего зависит, сколько держится процедура", "how": "Объясни своими словами, без обещаний конкретного срока."}, {"cat": "UGC", "title": "Один продукт — три способа применения", "how": "Крупные планы средства плюс ты в кадре. Каждый способ — отдельная сцена."}, {"cat": "Лайф", "title": "Как я выключаюсь после смены", "how": "Бытовой кадр без постановки: что делаешь первым делом дома."}, {"cat": "Фешн", "title": "Что я ношу под форму", "how": "Базовый гардероб мастера: что удобно, что не пачкается, что держит вид к вечеру."}, {"cat": "Тренд", "title": "Формат «рейтинг»", "how": "Расставь по местам вещи из своей ниши под трендовый звук. Звук подбери свежий на момент съёмки."}], [{"cat": "Ниша", "title": "Что я слышу в запросе клиента", "how": "Разбираешь на камеру: клиент просит одно, а по волосам видно другое."}, {"cat": "UGC", "title": "Отзыв как разговор с подругой", "how": "Рассказываешь про средство своими словами, не рекламным языком. Один дубль, смотришь в камеру."}, {"cat": "Лайф", "title": "Мой выходной", "how": "Куда идёшь, что ешь, с кем. Без сценария, просто день от первого лица."}, {"cat": "Фешн", "title": "Одна вещь — три образа", "how": "Переодевания в кадре: жакет, рубашка или платье в трёх сочетаниях."}, {"cat": "Тренд", "title": "Формат POV", "how": "Разыграй ситуацию из студии под текущий тренд. Актуальный звук ищи в Reels в день съёмки."}], [{"cat": "Ниша", "title": "Как понять, что мастер хороший", "how": "Три признака честно, на камеру. Полезно новичкам, которые боятся идти к незнакомому мастеру."}, {"cat": "UGC", "title": "День со средством", "how": "Как продукт живёт в твоём дне: утро, работа, вечер. Три-четыре коротких сцены с тобой."}, {"cat": "Лайф", "title": "Итоги месяца без прикрас", "how": "Что получилось, что нет. Честный ролик заходит лучше отчёта о победах."}, {"cat": "Фешн", "title": "Что я купила за месяц и что реально ношу", "how": "Примерка на себе, разделяешь удачные покупки и промахи."}, {"cat": "Тренд", "title": "Формат «переход»", "how": "Один трендовый переход: до и после в одном кадре. Звук — из актуальных на неделе съёмки."}]]
   };
 
-  /* ---------- память: CloudStorage Telegram, если доступен ---------- */
-  var MEM={}, CS=null, persist=false;
+  /* ---------- память: CloudStorage Telegram, иначе localStorage ---------- */
+  var MEM={}, CS=null, LS=null, persist=false;
   try{ CS=(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.CloudStorage)||null; }catch(e){}
-  if(CS&&CS.setItem&&CS.getItem) persist=true;
+  if(!(CS&&CS.setItem&&CS.getItem)) CS=null;
+  if(!CS){
+    try{ window.localStorage.setItem('silk_probe','1'); window.localStorage.removeItem('silk_probe'); LS=window.localStorage; }catch(e){ LS=null; }
+  }
+  if(CS||LS) persist=true;
   function store(k,v){
-    if(persist){ try{ CS.setItem(k,String(v),function(){}); return; }catch(e){} }
+    if(CS){ try{ CS.setItem(k,String(v),function(){}); return; }catch(e){} }
+    if(LS){ try{ LS.setItem(k,String(v)); return; }catch(e){} }
     MEM[k]=String(v);
   }
   function forget(k){
-    if(persist){ try{ CS.removeItem(k,function(){}); }catch(e){} }
+    if(CS){ try{ CS.removeItem(k,function(){}); }catch(e){} }
+    if(LS){ try{ LS.removeItem(k); }catch(e){} }
     delete MEM[k];
   }
   function load(k,cb){
-    if(persist){ try{ CS.getItem(k,function(err,val){ cb(err?null:(val||null)); }); return; }catch(e){} }
+    if(CS){ try{ CS.getItem(k,function(err,val){ cb(err?null:(val||null)); }); return; }catch(e){} }
+    if(LS){ try{ cb(LS.getItem(k)||null); return; }catch(e){} }
     cb(MEM[k]||null);
+  }
+
+  /* ---------- сохранение своего прогресса ---------- */
+  function mineKey(id){ return 'silk_mine_'+String(id).replace(/[^A-Za-z0-9_-]/g,'_'); }
+  function bytes(s){
+    var n=0;
+    for(var i=0;i<s.length;i++){ var c=s.charCodeAt(i); n+=(c<0x80?1:(c<0x800?2:3)); }
+    return n;
+  }
+  function saveMine(){
+    var me=getMe(); if(!me) return;
+    var posts=state.posts.slice(0,80), cps=state.checkpoints.slice();
+    var pack=function(list,points){
+      return JSON.stringify({v:1,count:me.count,collabs:me.collabs,viral:me.viral,
+        goal:String(me.goal||'').slice(0,200),posts:list,checkpoints:points});
+    };
+    var out=pack(posts,cps);
+    while(bytes(out)>3900&&posts.length){ posts.pop(); out=pack(posts,cps); }
+    while(bytes(out)>3900&&cps.length>1){ cps.shift(); out=pack(posts,cps); }
+    store(mineKey(state.me),out);
+  }
+  function restoreMine(raw){
+    if(!raw) return;
+    var d; try{ d=JSON.parse(raw); }catch(e){ return; }
+    if(!d||typeof d!=='object') return;
+    var me=byId(state.me); if(!me) return;
+    if(typeof d.count==='number') me.count=d.count;
+    if(typeof d.collabs==='number') me.collabs=d.collabs;
+    if(typeof d.viral==='number') me.viral=d.viral;
+    if(d.goal) me.goal=d.goal;
+    if(d.posts&&d.posts.length) state.posts=d.posts.slice();
+    if(d.checkpoints&&d.checkpoints.length) state.checkpoints=d.checkpoints.slice();
   }
 
   function boot(d){
@@ -320,7 +359,11 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
       load('silk_goal',function(g){
         var p=byId(id);
         if(p){ state.me=id; if(g) p.goal=g; }
-        render();
+        if(!state.me){ render(); return; }
+        load(mineKey(state.me),function(raw){
+          restoreMine(raw);
+          render();
+        });
       });
     });
   }
@@ -409,7 +452,7 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
         '<div class="rule"><span class="label">Правило</span>'+
           '<p>'+esc(c.rule)+'</p><p>'+esc(c.ruleDetail)+'</p></div>'+
         '<button class="cta" id="hGo" style="margin-top:24px">Войти в челлендж</button>'+
-        (persist?'':'<div class="ach__hint" style="margin-top:14px">Вне Telegram выбор не сохраняется между перезагрузками.</div>')+
+        (persist?'':'<div class="ach__hint" style="margin-top:14px">В этом браузере память отключена — отметки не сохранятся после перезагрузки.</div>')+
       '</div>';
 
     var goalEl=document.getElementById('hGoal'), msg=document.getElementById('hMsg');
@@ -440,7 +483,12 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
     var p=byId(id); if(!p) return;
     p.goal=goal; state.me=id;
     store('silk_me',id); store('silk_goal',goal);
-    render(); toast('Ты в списке · '+p.name);
+    load(mineKey(id),function(raw){
+      restoreMine(raw);
+      p.goal=goal;
+      saveMine();
+      render(); toast('Ты в списке · '+p.name);
+    });
   }
   function leave(){
     forget('silk_me'); forget('silk_goal');
@@ -600,7 +648,7 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
   function bumpAch(key){
     if(key!=='collabs'&&key!=='viral') return;
     var me=getMe(); if(!me) return;
-    me[key]+=1; render();
+    me[key]+=1; saveMine(); render();
     toast((key==='collabs'?'Сотрудничество · ':'Рилс 10 000+ · ')+me[key]);
     try{ window.Telegram.WebApp.HapticFeedback.impactOccurred('light'); }catch(e){}
   }
@@ -670,6 +718,7 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
         if(!okBox){ msg.textContent='Отметь галочку: засчитываются только ролики, где ты в кадре.'; return; }
         var me=getMe(); me.count+=1;
         state.posts.unshift({n:me.count,date:todayISO(),url:v});
+        saveMine();
         closeSheet(); render();
         toast('Засчитано · '+me.count+' из '+state.challenge.goal);
         try{ window.Telegram.WebApp.HapticFeedback.notificationOccurred('success'); }catch(e){}
@@ -687,6 +736,7 @@ window.__COVER__='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgc
         if(f===null){ fail(fol,'Впиши число подписчиков.'); return; }
         if(r===null){ fail(rch,'Впиши число охватов.'); return; }
         state.checkpoints.push({date:todayISO(),followers:f,reach:r});
+        saveMine();
         closeSheet(); render();
         toast('Замер сохранён · '+num(f)+' / '+num(r));
         try{ window.Telegram.WebApp.HapticFeedback.notificationOccurred('success'); }catch(e){}
